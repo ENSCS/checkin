@@ -3,16 +3,38 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 session_start();
+date_default_timezone_set('Asia/Bangkok');
 
-$sid = isset($_GET['sid']) ? trim($_GET['sid']) : '';
+// รับค่าจาก QR URL: ?id=7&s=sig&t=timestamp
+$db_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$sig   = isset($_GET['s'])  ? trim($_GET['s'])  : '';
+$t_qr  = isset($_GET['t'])  ? (int)$_GET['t']  : 0;
 
-if (!$sid) {
+if (!$db_id || !$sig || !$t_qr) {
     header('Location: session_create.php');
     exit;
 }
 
-$class_date   = substr($sid, -10);
+// lookup sid จาก DB
+require_once __DIR__ . '/connect.php';
+$stmt = $pdo->prepare('SELECT id, sid FROM ckn_sessions WHERE id = :id LIMIT 1');
+$stmt->execute(array(':id' => $db_id));
+$session_row = $stmt->fetch();
+
+if (!$session_row) {
+    header('Location: session_create.php');
+    exit;
+}
+
+$sid        = $session_row['sid'];
+$class_date = substr($sid, -10);
 $display_date = date('d/m/Y', strtotime($class_date));
+
+// แยก course/section เพื่อแสดงผล
+$prefix  = substr($sid, 0, -11);
+$dash    = strrpos($prefix, '-');
+$course  = $dash !== false ? substr($prefix, 0, $dash) : $prefix;
+$section = $dash !== false ? substr($prefix, $dash + 1) : '';
 ?>
 <!DOCTYPE html>
 <html lang="th">
@@ -85,68 +107,6 @@ input::placeholder { color: #444; }
 }
 .error.show { display: block; }
 
-/* หน้าสแกน QR */
-.scan-screen {
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    width: 100%;
-    max-width: 400px;
-    text-align: center;
-}
-.scan-screen.show { display: flex; }
-.card.hide { display: none; }
-
-.scan-name { font-size: 1rem; font-weight: 600; color: #fff; }
-.scan-sub  { font-size: 0.8rem; color: #555; margin-top: -8px; }
-
-.camera-wrap {
-    width: 100%;
-    position: relative;
-    border-radius: 16px;
-    overflow: hidden;
-    background: #000;
-    aspect-ratio: 1;
-}
-#preview {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-.scan-overlay {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.scan-box {
-    width: 60%;
-    aspect-ratio: 1;
-    border: 2px solid #639922;
-    border-radius: 12px;
-    box-shadow: 0 0 0 1000px rgba(0,0,0,0.4);
-}
-.scan-line {
-    position: absolute;
-    width: 56%;
-    height: 2px;
-    background: #639922;
-    animation: scanline 2s ease-in-out infinite;
-    opacity: 0.8;
-}
-@keyframes scanline {
-    0%   { top: 22%; }
-    50%  { top: 74%; }
-    100% { top: 22%; }
-}
-.scan-label {
-    font-size: 0.85rem;
-    color: #aaa;
-}
-
 /* หน้าผลลัพธ์ */
 .result-screen {
     display: none;
@@ -158,6 +118,8 @@ input::placeholder { color: #444; }
     text-align: center;
 }
 .result-screen.show { display: flex; }
+.card.hide { display: none; }
+
 .result-icon {
     width: 80px; height: 80px;
     border-radius: 50%;
@@ -171,8 +133,8 @@ input::placeholder { color: #444; }
 .result-title { font-size: 1.3rem; font-weight: 600; }
 .result-title.success { color: #639922; }
 .result-title.error   { color: #E24B4A; }
-.result-name  { font-size: 1rem; color: #fff; font-weight: 600; }
-.result-id    { font-size: 0.85rem; color: #555; }
+.result-id    { font-size: 1.4rem; color: #fff; font-weight: 700; letter-spacing: 1px; }
+.result-name  { font-size: 1.4rem; color: #fff; font-weight: 700; }
 .result-box {
     background: #1a1d27;
     border-radius: 12px;
@@ -202,7 +164,7 @@ input::placeholder { color: #444; }
 <!-- หน้ากรอกข้อมูล -->
 <div class="card" id="form-card">
     <h1>เช็คชื่อเข้าเรียน</h1>
-    <p class="meta"><?php echo htmlspecialchars($sid); ?> &nbsp;|&nbsp; <?php echo $display_date; ?></p>
+    <p class="meta"><?php echo htmlspecialchars($course); ?> ตอน <?php echo htmlspecialchars($section); ?> &nbsp;|&nbsp; <?php echo $display_date; ?></p>
 
     <div class="error" id="error-box"></div>
 
@@ -224,22 +186,7 @@ input::placeholder { color: #444; }
                maxlength="40" autocomplete="off">
     </div>
 
-    <button class="btn" id="btn-confirm">ยืนยันและสแกน QR</button>
-</div>
-
-<!-- หน้าสแกน QR -->
-<div class="scan-screen" id="scan-screen">
-    <div class="scan-name" id="scan-name"></div>
-    <div class="scan-sub"  id="scan-id"></div>
-    <div class="camera-wrap">
-        <video id="preview" autoplay playsinline muted></video>
-        <div class="scan-overlay">
-            <div class="scan-box"></div>
-            <div class="scan-line"></div>
-        </div>
-    </div>
-    <div class="scan-label">จ่อกล้องไปที่ QR บนจอหน้าห้อง</div>
-    <canvas id="canvas" style="display:none"></canvas>
+    <button class="btn" id="btn-confirm">ยืนยันการเช็คชื่อ</button>
 </div>
 
 <!-- หน้าผลลัพธ์ -->
@@ -252,24 +199,22 @@ input::placeholder { color: #444; }
     <button class="btn-retry" id="btn-retry" style="display:none" onclick="retryForm()">กรอกใหม่อีกครั้ง</button>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
-var sid          = '<?php echo addslashes($sid); ?>';
-var student_id    = '';
-var student_fname = '';
-var student_lname = '';
-var videoStream   = null;
-var scanInterval  = null;
+var db_id         = <?php echo $db_id; ?>;
+var sid           = '<?php echo addslashes($sid); ?>';
+var t_qr          = <?php echo $t_qr; ?>;
+var sig_from_url  = '<?php echo addslashes($sig); ?>';
+var t_scan        = Math.floor(Date.now() / 1000); // บันทึกเวลาที่หน้าโหลด = เวลาสแกน QR ติด
 
 document.getElementById('student_id').addEventListener('input', function() {
     this.value = this.value.replace(/[^0-9]/g, '');
 });
 
 document.getElementById('btn-confirm').addEventListener('click', function() {
-    student_id    = document.getElementById('student_id').value.trim();
-    student_fname = document.getElementById('student_fname').value.trim();
-    student_lname = document.getElementById('student_lname').value.trim();
-    var errorBox  = document.getElementById('error-box');
+    var student_id    = document.getElementById('student_id').value.trim();
+    var student_fname = document.getElementById('student_fname').value.trim();
+    var student_lname = document.getElementById('student_lname').value.trim();
+    var errorBox      = document.getElementById('error-box');
 
     if (!student_id || !student_fname || !student_lname) {
         errorBox.textContent = 'กรุณากรอกข้อมูลให้ครบทุกช่อง';
@@ -283,119 +228,65 @@ document.getElementById('btn-confirm').addEventListener('click', function() {
     }
 
     errorBox.classList.remove('show');
+    document.getElementById('btn-confirm').disabled = true;
 
-    document.getElementById('scan-name').textContent = student_fname + ' ' + student_lname;
-    document.getElementById('scan-id').textContent   = student_id;
-    document.getElementById('form-card').classList.add('hide');
-    document.getElementById('scan-screen').classList.add('show');
+    var t_submit     = Math.floor(Date.now() / 1000);
+    var elapsed_scan = t_scan - t_qr;     // เวลาตั้งแต่ QR gen ถึงสแกนติด (สำคัญ)
+    var elapsed_fill = t_submit - t_scan; // เวลากรอกชื่อ (ข้อมูลเพิ่มเติม)
 
-    startCamera();
+    submitCheckin(student_id, student_fname, student_lname, elapsed_scan, elapsed_fill);
 });
 
-function startCamera() {
-    navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-    })
-    .then(function(stream) {
-        videoStream = stream;
-        var video = document.getElementById('preview');
-        video.srcObject = stream;
-        video.play();
-        scanInterval = setInterval(scanFrame, 300);
-    })
-    .catch(function() {
-        showResult(false, 'ไม่สามารถเปิดกล้องได้', '', '', 'กรุณาอนุญาตการใช้งานกล้องแล้วลองใหม่');
-    });
-}
-
-function stopCamera() {
-    if (videoStream) {
-        videoStream.getTracks().forEach(function(t) { t.stop(); });
-        videoStream = null;
-    }
-    if (scanInterval) {
-        clearInterval(scanInterval);
-        scanInterval = null;
-    }
-}
-
-function scanFrame() {
-    var video  = document.getElementById('preview');
-    var canvas = document.getElementById('canvas');
-    if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
-
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-    var ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    var code = jsQR(imageData.data, imageData.width, imageData.height);
-
-    if (code && code.data) {
-        var url   = code.data;
-        var matchS = url.match(/(?:^|[?&])s=([^&]+)/);
-        var matchT = url.match(/(?:^|[?&])t=([^&]+)/);
-        if (matchS && matchT) {
-            var sig     = matchS[1];
-            var t_qr    = parseInt(matchT[1]);
-            var t_scan  = Math.floor(Date.now() / 1000);
-            var elapsed = t_scan - t_qr;
-            stopCamera();
-            submitCheckin(sig, elapsed);
-        }
-    }
-}
-
-function submitCheckin(sig, elapsed) {
-    document.getElementById('scan-screen').classList.remove('show');
-
+function submitCheckin(student_id, student_fname, student_lname, elapsed_scan, elapsed_fill) {
     fetch('checkin_process.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            sig:           sig,
-            sid:           sid,
+            db_id:         db_id,
+            sig:           sig_from_url,
+            t_qr:          t_qr,
             student_id:    student_id,
             student_fname: student_fname,
             student_lname: student_lname,
-            elapsed:       elapsed,
+            elapsed_scan:  elapsed_scan,
+            elapsed_fill:  elapsed_fill,
         })
     })
     .then(function(r) { return r.json(); })
     .then(function(d) {
+        document.getElementById('form-card').classList.add('hide');
         if (d.success) {
-            var elapsed_text = d.elapsed !== null ? d.elapsed + ' วินาที' : '-';
+            var elapsed_text = d.elapsed_scan !== null ? d.elapsed_scan + ' วินาที' : '-';
             var detail = 'วิชา: <span>' + d.course + '</span><br>'
                        + 'ตอน: <span>' + d.section + '</span><br>'
                        + 'วันเวลา: <span>' + d.t_receive + '</span><br>'
-                       + 'ระยะเวลา: <span>' + elapsed_text + '</span>';
+                       + 'ระยะเวลาสแกน: <span>' + elapsed_text + '</span>';
             showResult(true, 'เช็คชื่อสำเร็จ', student_fname + ' ' + student_lname, student_id, detail);
         } else {
             showResult(false, d.message || 'เกิดข้อผิดพลาด', '', '', '');
         }
     })
     .catch(function() {
+        document.getElementById('btn-confirm').disabled = false;
         showResult(false, 'ไม่สามารถเชื่อมต่อได้', '', '', 'กรุณาลองใหม่อีกครั้ง');
     });
 }
 
 function showResult(success, title, name, stid, detail) {
-    document.getElementById('scan-screen').classList.remove('show');
-    var res = document.getElementById('result-screen');
-    res.classList.add('show');
+    document.getElementById('result-screen').classList.add('show');
 
-    var icon  = document.getElementById('res-icon');
-    var ttl   = document.getElementById('res-title');
+    var icon = document.getElementById('res-icon');
+    var ttl  = document.getElementById('res-title');
     icon.textContent = success ? '✓' : '✗';
     icon.className   = 'result-icon ' + (success ? 'success' : 'error');
     ttl.textContent  = title;
     ttl.className    = 'result-title ' + (success ? 'success' : 'error');
 
     if (name) {
-        document.getElementById('res-name').textContent = name;
-        document.getElementById('res-name').style.display = 'block';
         document.getElementById('res-id').textContent   = stid;
         document.getElementById('res-id').style.display = 'block';
+        document.getElementById('res-name').textContent = name;
+        document.getElementById('res-name').style.display = 'block';
     }
     if (detail) {
         document.getElementById('res-box').innerHTML    = detail;
@@ -409,10 +300,13 @@ function showResult(success, title, name, stid, detail) {
 function retryForm() {
     document.getElementById('result-screen').classList.remove('show');
     document.getElementById('form-card').classList.remove('hide');
+    document.getElementById('btn-confirm').disabled = false;
     document.getElementById('res-name').style.display = 'none';
     document.getElementById('res-id').style.display   = 'none';
     document.getElementById('res-box').style.display  = 'none';
     document.getElementById('btn-retry').style.display = 'none';
+    // รีเซ็ต t_scan ใหม่เมื่อกรอกใหม่
+    t_scan = Math.floor(Date.now() / 1000);
 }
 </script>
 </body>

@@ -18,9 +18,8 @@ if (!$sid) {
 
 require_once __DIR__ . '/connect.php';
 
-// ดึงรายชื่อ checkins
 $stmt = $pdo->prepare('
-    SELECT id, student_id, student_fname, student_lname, sig, t_receive, ip_address, elapsed
+    SELECT id, student_id, student_fname, student_lname, sig, t_receive, ip_address, elapsed_scan, elapsed_fill
     FROM ckn_checkins
     WHERE sid = :sid
     ORDER BY t_receive ASC
@@ -28,7 +27,6 @@ $stmt = $pdo->prepare('
 $stmt->execute(array(':sid' => $sid));
 $checkins = $stmt->fetchAll();
 
-// แยก sid
 $date    = substr($sid, -10);
 $prefix  = substr($sid, 0, -11);
 $dash    = strrpos($prefix, '-');
@@ -41,17 +39,19 @@ if (isset($_GET['export'])) {
     header('Content-Disposition: attachment; filename="checkin_' . $sid . '.csv"');
     $out = fopen('php://output', 'w');
     fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF));
-    fputcsv($out, array('ลำดับ', 'รหัสนักศึกษา', 'ชื่อ', 'นามสกุล', 'วันเวลาเช็คชื่อ', 'ระยะเวลา (วิ)', 'IP Address'));
+    fputcsv($out, array('ลำดับ', 'รหัสนักศึกษา', 'ชื่อ', 'นามสกุล', 'วันเวลาเช็คชื่อ', 'ระยะเวลาสแกน (วิ)', 'ระยะเวลากรอก (วิ)', 'IP Address'));
     $i = 1;
     foreach ($checkins as $c) {
-        $elapsed = ($c['elapsed'] !== null) ? (int)$c['elapsed'] : '-';
+        $es = ($c['elapsed_scan'] !== null) ? (int)$c['elapsed_scan'] : '-';
+        $ef = ($c['elapsed_fill'] !== null) ? (int)$c['elapsed_fill'] : '-';
         fputcsv($out, array(
             $i++,
             $c['student_id'],
             $c['student_fname'],
             $c['student_lname'],
             $c['t_receive'],
-            $elapsed,
+            $es,
+            $ef,
             $c['ip_address'],
         ));
     }
@@ -150,11 +150,7 @@ body {
 .search-box input:focus { border-color: #639922; }
 .search-box input::placeholder { color: #444; }
 
-.info-row {
-    font-size: 0.85rem;
-    color: #555;
-    margin-bottom: 10px;
-}
+.info-row { font-size: 0.85rem; color: #555; margin-bottom: 10px; }
 .table-wrap {
     background: #1a1d27;
     border-radius: 12px;
@@ -193,31 +189,6 @@ tr:hover td { background: #1f2333; }
 .elapsed.warning { background: #2a1a0f; color: #EF9F27; border: 1px solid #4a3a1a; }
 .elapsed.danger  { background: #2a1a1a; color: #E24B4A; border: 1px solid #4a2a2a; }
 .no-data { padding: 40px; text-align: center; color: #444; }
-.pagination {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 16px;
-    border-top: 1px solid #2a2d3a;
-    font-size: 0.85rem;
-    color: #555;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-.page-btns { display: flex; gap: 6px; }
-.page-btns button {
-    padding: 6px 12px;
-    background: #0f1117;
-    color: #aaa;
-    border: 1px solid #2a2d3a;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.8rem;
-    transition: all 0.2s;
-}
-.page-btns button:hover { border-color: #639922; color: #639922; }
-.page-btns button.active { background: #639922; color: #fff; border-color: #639922; }
-.page-btns button:disabled { opacity: 0.3; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -236,16 +207,20 @@ tr:hover td { background: #1f2333; }
 
     <div class="summary-row">
         <div class="summary-box">
-            <strong id="total-count"><?php echo count($checkins); ?></strong>
+            <strong><?php echo count($checkins); ?></strong>
             จำนวนที่เช็คชื่อ
         </div>
         <div class="summary-box">
-            <strong id="avg-elapsed">—</strong>
-            ระยะเวลาเฉลี่ย (วิ)
+            <strong id="avg-scan">—</strong>
+            เฉลี่ยเวลาสแกน (วิ)
         </div>
         <div class="summary-box">
             <strong id="suspicious-count">—</strong>
-            รายการน่าสงสัย (>5 วิ)
+            น่าสงสัย elapsed_scan &gt;7 วิ
+        </div>
+        <div class="summary-box">
+            <strong id="avg-fill">—</strong>
+            เฉลี่ยเวลากรอก (วิ)
         </div>
     </div>
 
@@ -259,13 +234,14 @@ tr:hover td { background: #1f2333; }
         <table>
             <thead>
                 <tr>
-                    <th onclick="sortBy('no')"           id="th-no">ลำดับ <span class="sort-icon">↕</span></th>
-                    <th onclick="sortBy('student_id')"   id="th-student_id">รหัส <span class="sort-icon">↕</span></th>
+                    <th onclick="sortBy('no')"            id="th-no">ลำดับ <span class="sort-icon">↕</span></th>
+                    <th onclick="sortBy('student_id')"    id="th-student_id">รหัส <span class="sort-icon">↕</span></th>
                     <th onclick="sortBy('student_fname')" id="th-student_fname">ชื่อ <span class="sort-icon">↕</span></th>
                     <th onclick="sortBy('student_lname')" id="th-student_lname">นามสกุล <span class="sort-icon">↕</span></th>
-                    <th onclick="sortBy('t_receive')"    id="th-t_receive">วันเวลาเช็คชื่อ <span class="sort-icon">↕</span></th>
-                    <th onclick="sortBy('ip_address')"   id="th-ip_address">IP Address <span class="sort-icon">↕</span></th>
-                    <th onclick="sortBy('elapsed')"      id="th-elapsed">ระยะเวลา (วิ) <span class="sort-icon">↕</span></th>
+                    <th onclick="sortBy('t_receive')"     id="th-t_receive">วันเวลาเช็คชื่อ <span class="sort-icon">↕</span></th>
+                    <th onclick="sortBy('ip_address')"    id="th-ip_address">IP Address <span class="sort-icon">↕</span></th>
+                    <th onclick="sortBy('elapsed_scan')"  id="th-elapsed_scan">สแกน (วิ) <span class="sort-icon">↕</span></th>
+                    <th onclick="sortBy('elapsed_fill')"  id="th-elapsed_fill">กรอก (วิ) <span class="sort-icon">↕</span></th>
                 </tr>
             </thead>
             <tbody id="table-body"></tbody>
@@ -279,7 +255,6 @@ var RAW = <?php
     $out = array();
     $i   = 1;
     foreach ($checkins as $c) {
-        $elapsed = ($c['elapsed'] !== null) ? (int)$c['elapsed'] : null;
         $out[] = array(
             'no'            => $i++,
             'student_id'    => $c['student_id'],
@@ -287,7 +262,8 @@ var RAW = <?php
             'student_lname' => $c['student_lname'],
             't_receive'     => $c['t_receive'],
             'ip_address'    => $c['ip_address'] ? $c['ip_address'] : '-',
-            'elapsed'       => $elapsed,
+            'elapsed_scan'  => ($c['elapsed_scan'] !== null) ? (int)$c['elapsed_scan'] : null,
+            'elapsed_fill'  => ($c['elapsed_fill'] !== null) ? (int)$c['elapsed_fill'] : null,
         );
     }
     echo json_encode($out);
@@ -300,12 +276,13 @@ var filtered = RAW.slice();
 // summary
 (function() {
     if (RAW.length === 0) return;
-    var hasElapsed = RAW.filter(function(r) { return r.elapsed !== null; });
-    var sumE       = hasElapsed.reduce(function(s, r) { return s + r.elapsed; }, 0);
-    var avgE       = hasElapsed.length > 0 ? Math.round(sumE / hasElapsed.length) : '-';
-    var suspicious = hasElapsed.filter(function(r) { return r.elapsed > 5; }).length;
-    document.getElementById('avg-elapsed').textContent      = avgE;
-    document.getElementById('suspicious-count').textContent = suspicious;
+    var hasScan = RAW.filter(function(r) { return r.elapsed_scan !== null; });
+    var hasFill = RAW.filter(function(r) { return r.elapsed_fill !== null; });
+    var sumScan = hasScan.reduce(function(s, r) { return s + r.elapsed_scan; }, 0);
+    var sumFill = hasFill.reduce(function(s, r) { return s + r.elapsed_fill; }, 0);
+    document.getElementById('avg-scan').textContent         = hasScan.length ? Math.round(sumScan / hasScan.length) : '-';
+    document.getElementById('avg-fill').textContent         = hasFill.length ? Math.round(sumFill / hasFill.length) : '-';
+    document.getElementById('suspicious-count').textContent = hasScan.filter(function(r) { return r.elapsed_scan > 7; }).length;
 })();
 
 function applyFilter() {
@@ -329,16 +306,26 @@ function sortBy(col) {
     render();
 }
 
+function getDupIPs() {
+    var count = {};
+    RAW.forEach(function(r) { count[r.ip_address] = (count[r.ip_address] || 0) + 1; });
+    var dup = {};
+    Object.keys(count).forEach(function(ip) { if (count[ip] > 1) dup[ip] = true; });
+    return dup;
+}
+
 function render() {
     var dir = sortDir === 'asc' ? 1 : -1;
     filtered.sort(function(a, b) {
         var av = a[sortCol];
         var bv = b[sortCol];
+        if (av === null) return 1;
+        if (bv === null) return -1;
         if (typeof av === 'number') return (av - bv) * dir;
         return String(av).localeCompare(String(bv)) * dir;
     });
 
-    ['no','student_id','student_fname','student_lname','t_receive','ip_address','elapsed'].forEach(function(c) {
+    ['no','student_id','student_fname','student_lname','t_receive','ip_address','elapsed_scan','elapsed_fill'].forEach(function(c) {
         var th = document.getElementById('th-' + c);
         if (!th) return;
         th.classList.remove('active');
@@ -350,24 +337,27 @@ function render() {
         activeTh.querySelector('.sort-icon').textContent = sortDir === 'asc' ? '↑' : '↓';
     }
 
-    var total = filtered.length;
-    document.getElementById('info-text').textContent = 'ทั้งหมด ' + total + ' รายการ';
+    document.getElementById('info-text').textContent = 'ทั้งหมด ' + filtered.length + ' รายการ';
 
+    var dupIPs = getDupIPs();
     var tbody = document.getElementById('table-body');
     if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="no-data">ไม่พบข้อมูล</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="no-data">ไม่พบข้อมูล</td></tr>';
     } else {
         tbody.innerHTML = filtered.map(function(r) {
-            var cls          = r.elapsed === null ? 'ok' : r.elapsed <= 3 ? 'ok' : r.elapsed <= 5 ? 'warning' : 'danger';
-            var elapsed_text = r.elapsed === null ? '-' : r.elapsed + ' วิ';
+            var cls_scan  = r.elapsed_scan === null ? 'ok' : r.elapsed_scan <= 5 ? 'ok' : r.elapsed_scan <= 7 ? 'warning' : 'danger';
+            var text_scan = r.elapsed_scan === null ? '-' : r.elapsed_scan + ' วิ';
+            var text_fill = r.elapsed_fill === null ? '-' : r.elapsed_fill + ' วิ';
+            var ip_style  = dupIPs[r.ip_address] ? ' style="color:#EF9F27;font-weight:600;"' : '';
             return '<tr>' +
                 '<td>' + r.no + '</td>' +
                 '<td>' + r.student_id + '</td>' +
                 '<td>' + r.student_fname + '</td>' +
                 '<td>' + r.student_lname + '</td>' +
                 '<td>' + r.t_receive + '</td>' +
-                '<td>' + r.ip_address + '</td>' +
-                '<td><span class="elapsed ' + cls + '">' + elapsed_text + '</span></td>' +
+                '<td' + ip_style + '>' + r.ip_address + '</td>' +
+                '<td><span class="elapsed ' + cls_scan + '">' + text_scan + '</span></td>' +
+                '<td>' + text_fill + '</td>' +
             '</tr>';
         }).join('');
     }

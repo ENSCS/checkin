@@ -6,16 +6,17 @@ session_start();
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/qrlib/qrlib.php';
 
-if (empty($_SESSION['sid']) || empty($_SESSION['secret_key'])) {
+if (empty($_SESSION['session_db_id']) || empty($_SESSION['sid']) || empty($_SESSION['secret_key'])) {
     header('Location: session_create.php');
     exit;
 }
 
-$sid        = $_SESSION['sid'];
-$secret_key = $_SESSION['secret_key'];
-$course     = isset($_SESSION['course'])     ? $_SESSION['course']     : '';
-$section    = isset($_SESSION['section'])    ? $_SESSION['section']    : '';
-$class_name = $course . ' ตอน ' . $section;
+$session_db_id = (int)$_SESSION['session_db_id'];
+$sid           = $_SESSION['sid'];
+$secret_key    = $_SESSION['secret_key'];
+$course        = isset($_SESSION['course'])  ? $_SESSION['course']  : '';
+$section       = isset($_SESSION['section']) ? $_SESSION['section'] : '';
+$class_name    = htmlspecialchars($course . ' ตอน ' . $section);
 
 $t       = (int) floor(time() / WINDOW_SEC) * WINDOW_SEC;
 $seq     = (int) floor(time() / WINDOW_SEC);
@@ -24,16 +25,15 @@ $sig_val = substr(hash_hmac('sha256', $sid . $t . $seq, $secret_key), 0, 8);
 $protocol  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host      = $_SERVER['HTTP_HOST'];
 $base_path = dirname($_SERVER['PHP_SELF']);
-$qr_url = 's=' . $sig_val . '&t=' . $t;
+$qr_url    = $protocol . '://' . $host . $base_path . '/checkin_form.php?id=' . $session_db_id . '&s=' . $sig_val . '&t=' . $t;
 
 $qr_file   = __DIR__ . '/qr_tmp.png';
 QRcode::png($qr_url, $qr_file, QR_ECLEVEL_M, 8, 2);
 $qr_base64 = 'data:image/png;base64,' . base64_encode(file_get_contents($qr_file));
 
-$expires_at  = time() + (SESSION_MIN * 60);
-$session_sec = SESSION_MIN * 60;
+$session_sec = 3 * 60; // 3 นาที
+$expires_at  = time() + $session_sec;
 $window_sec  = WINDOW_SEC;
-$class_name  = htmlspecialchars($class_name);
 ?>
 <!DOCTYPE html>
 <html lang="th">
@@ -82,22 +82,6 @@ h1 { font-size: 1.8rem; margin-bottom: 6px; text-align: center; }
     max-width: 340px;
     margin-top: 16px;
 }
-.btn-ready {
-    flex: 1;
-    padding: 14px;
-    background: #2a2d3a;
-    color: #aaa;
-    border: 1px solid #3a3d4a;
-    border-radius: 10px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-decoration: none;
-    display: inline-block;
-    text-align: center;
-}
-.btn-ready:hover { background: #3a3d4a; color: #fff; }
 .btn-extend {
     flex: 1;
     padding: 14px;
@@ -150,26 +134,12 @@ h1 { font-size: 1.8rem; margin-bottom: 6px; text-align: center; }
     display: inline-block;
 }
 .btn-new-session:hover { background: #155a8a; }
-.btn-back-ready {
-    padding: 14px 28px;
-    background: #2a2d3a;
-    color: #aaa;
-    border: 1px solid #3a3d4a;
-    border-radius: 10px;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-decoration: none;
-    display: inline-block;
-}
-.btn-back-ready:hover { background: #3a3d4a; color: #fff; }
 </style>
 </head>
 <body>
 
 <h1><?php echo $class_name; ?></h1>
-<p class="sub">เปิดเว็บแอพแล้วสแกน QR เพื่อเช็คชื่อ</p>
+<p class="sub">นศ. สแกน QR นี้เพื่อเช็คชื่อ</p>
 
 <div class="card">
     <img id="qr-img" src="<?php echo $qr_base64; ?>" alt="QR Code">
@@ -186,16 +156,14 @@ h1 { font-size: 1.8rem; margin-bottom: 6px; text-align: center; }
 </div>
 
 <div class="btn-row">
-    <a href="session_ready.php?course=<?php echo urlencode($course); ?>&section=<?php echo urlencode($section); ?>&class_date=<?php echo urlencode(isset($_SESSION['class_date']) ? $_SESSION['class_date'] : ''); ?>" class="btn-ready">QR ฟอร์ม นศ.</a>
-    <button class="btn-extend" onclick="extendTime()">ต่อเวลา +1 นาที</button>
+    <button class="btn-extend" onclick="extendTime()">ต่อเวลา +3 นาที</button>
 </div>
 
 <div class="expired" id="expired">
     <h2>หมดเวลาเช็คชื่อ</h2>
     <p>อาจารย์กรุณาปิดหน้านี้</p>
-    <button class="btn-expired-extend" onclick="extendTime()">ต่อเวลา +1 นาที</button>
+    <button class="btn-expired-extend" onclick="extendTime()">ต่อเวลา +3 นาที</button>
     <a href="session_create.php" class="btn-new-session">เปิดเช็คชื่อใหม่</a>
-    <a href="session_ready.php?course=<?php echo urlencode($course); ?>&section=<?php echo urlencode($section); ?>&class_date=<?php echo urlencode(isset($_SESSION['class_date']) ? $_SESSION['class_date'] : ''); ?>" class="btn-back-ready">แสดง QR ฟอร์มให้นักเรียน</a>
 </div>
 
 <script>

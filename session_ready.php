@@ -5,53 +5,45 @@ error_reporting(E_ALL);
 require_once __DIR__ . '/qrlib/qrlib.php';
 require_once __DIR__ . '/connect.php';
 
-// รับค่าจาก session_create.php
 $course     = isset($_GET['course'])     ? trim($_GET['course'])     : '';
 $section    = isset($_GET['section'])    ? trim($_GET['section'])    : '';
 $class_date = isset($_GET['class_date']) ? trim($_GET['class_date']) : date('Y-m-d');
 
-// ถ้าไม่มีข้อมูลให้กลับไปหน้าแรก
 if (!$course || !$section || !$class_date) {
     header('Location: session_create.php');
     exit;
 }
 
-// สร้าง sid
 $sid = $course . '-' . $section . '-' . $class_date;
 
-// secret_key สำหรับ session นี้
-//$secret_key = bin2hex(random_bytes(16));
-$secret_key = bin2hex(openssl_random_pseudo_bytes(16));
+// SELECT ก่อน — ถ้ามีอยู่แล้วเอาค่าเดิม ไม่สร้างใหม่
+$stmt = $pdo->prepare('SELECT id, secret_key FROM ckn_sessions WHERE sid = :sid LIMIT 1');
+$stmt->execute(array(':sid' => $sid));
+$existing = $stmt->fetch();
 
-// บันทึกลง DB (ถ้า sid ซ้ำให้ update secret_key ใหม่)
-$stmt = $pdo->prepare('
-    INSERT INTO ckn_sessions (sid, secret_key)
-    VALUES (:sid, :secret_key)
-    ON DUPLICATE KEY UPDATE secret_key = :secret_key2
-');
-$stmt->execute(array(
-    ':sid'         => $sid,
-    ':secret_key'  => $secret_key,
-    ':secret_key2' => $secret_key,
-));
+if ($existing) {
+    $session_db_id = $existing['id'];
+    $secret_key    = $existing['secret_key'];
+} else {
+    $secret_key = bin2hex(openssl_random_pseudo_bytes(16));
+    $stmt = $pdo->prepare('INSERT INTO ckn_sessions (sid, secret_key) VALUES (:sid, :secret_key)');
+    $stmt->execute(array(':sid' => $sid, ':secret_key' => $secret_key));
+    $session_db_id = (int)$pdo->lastInsertId();
+}
 
-// เก็บใน PHP session
 session_start();
-$_SESSION['sid']        = $sid;
-$_SESSION['course']     = $course;
-$_SESSION['section']    = $section;
-$_SESSION['class_date'] = $class_date;
-$_SESSION['secret_key'] = $secret_key;
+$_SESSION['sid']            = $sid;
+$_SESSION['session_db_id']  = $session_db_id;
+$_SESSION['course']         = $course;
+$_SESSION['section']        = $section;
+$_SESSION['class_date']     = $class_date;
+$_SESSION['secret_key']     = $secret_key;
 
-// สร้าง QR static → พานักเรียนไปหน้ากรอกชื่อ
+// QR Static ยังเก็บไว้ให้ แต่หน้านี้ไม่ได้ใช้แล้ว (นศ. สแกน Dynamic QR ครั้งเดียว)
 $protocol    = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host        = $_SERVER['HTTP_HOST'];
 $base_path   = dirname($_SERVER['PHP_SELF']);
-$checkin_url = $protocol . '://' . $host . $base_path . '/checkin_form.php?sid=' . urlencode($sid);
-
-$qr_file   = __DIR__ . '/qr_static.png';
-QRcode::png($checkin_url, $qr_file, QR_ECLEVEL_M, 8, 2);
-$qr_base64 = 'data:image/png;base64,' . base64_encode(file_get_contents($qr_file));
+$checkin_url = $protocol . '://' . $host . $base_path . '/checkin_form.php?id=' . $session_db_id;
 
 $display_date = date('d/m/Y', strtotime($class_date));
 ?>
@@ -89,9 +81,6 @@ h1 { font-size: 1.4rem; font-weight: 600; text-align: center; }
     align-items: center;
     gap: 16px;
 }
-.card-label { font-size: 0.8rem; color: #666; text-align: center; }
-.qr-wrap { background: #fff; border-radius: 12px; padding: 16px; }
-.qr-wrap img { display: block; width: 220px; height: 220px; }
 .info-box {
     width: 100%;
     background: #0f1117;
@@ -102,16 +91,16 @@ h1 { font-size: 1.4rem; font-weight: 600; text-align: center; }
     line-height: 1.8;
 }
 .info-box span { color: #f0f0f0; font-weight: 600; }
-.url-box {
+.notice {
     width: 100%;
-    background: #0f1117;
+    background: #1a2d0f;
+    border: 1px solid #2a4a1a;
     border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 0.75rem;
-    color: #555;
-    font-family: monospace;
-    word-break: break-all;
+    padding: 12px 16px;
+    font-size: 0.85rem;
+    color: #639922;
     text-align: center;
+    line-height: 1.6;
 }
 .btn-open {
     width: 100%;
@@ -147,17 +136,17 @@ h1 { font-size: 1.4rem; font-weight: 600; text-align: center; }
 </div>
 
 <div class="card">
-    <div class="card-label">ให้นักเรียนสแกน QR นี้เพื่อเปิดฟอร์มกรอกชื่อ</div>
-    <div class="qr-wrap">
-        <img src="<?php echo $qr_base64; ?>" alt="QR สำหรับนักเรียน">
-    </div>
     <div class="info-box">
         วิชา: <span><?php echo htmlspecialchars($course); ?></span><br>
         ตอน: <span><?php echo htmlspecialchars($section); ?></span><br>
         วันที่: <span><?php echo $display_date; ?></span><br>
-        Session ID: <span><?php echo htmlspecialchars($sid); ?></span>
+        Session ID: <span><?php echo htmlspecialchars($sid); ?></span><br>
+        DB ID: <span>#<?php echo $session_db_id; ?></span>
     </div>
-    <div class="url-box"><?php echo htmlspecialchars($checkin_url); ?></div>
+    <div class="notice">
+        นศ. สแกน QR บน Projector <strong>ครั้งเดียว</strong><br>
+        แล้วกรอกชื่อในหน้าที่เปิดขึ้นมาเลย
+    </div>
 </div>
 
 <a href="qr_display.php" class="btn-open">เปิด QR เช็คชื่อบน Projector</a>

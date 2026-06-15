@@ -267,6 +267,8 @@ tr:hover td { background: #1f2333; }
 <div class="report-wrap">
     <div class="page-header">
         <div class="page-title">รายงานการเช็คชื่อ</div>
+        <div style="display:flex;gap:8px;">
+        <a href="session_create.php" class="btn-outline">เปิดเช็คชื่อ</a>
         <a href="?logout=1" class="btn-outline" onclick="<?php
             if (isset($_GET['logout'])) {
                 unset($_SESSION['is_report']);
@@ -274,6 +276,7 @@ tr:hover td { background: #1f2333; }
                 exit;
             }
         ?>">ออกจากระบบ</a>
+        </div>
     </div>
 
     <!-- Filter -->
@@ -331,7 +334,7 @@ tr:hover td { background: #1f2333; }
                     <th onclick="sortBy('course')" id="th-course">วิชา <span class="sort-icon">↕</span></th>
                     <th onclick="sortBy('section')" id="th-section">ตอน <span class="sort-icon">↕</span></th>
                     <th onclick="sortBy('date')" id="th-date">วันที่ <span class="sort-icon">↕</span></th>
-                    <th onclick="sortBy('total')" id="th-total">จำนวน นร. <span class="sort-icon">↕</span></th>
+                    <th onclick="sortBy('total')" id="th-total">จำนวน นศ. <span class="sort-icon">↕</span></th>
                     <th></th>
                 </tr>
             </thead>
